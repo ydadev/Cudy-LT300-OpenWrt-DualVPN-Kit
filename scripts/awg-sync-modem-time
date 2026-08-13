@@ -1,0 +1,60 @@
+#!/bin/sh
+set -u
+
+PORT='/dev/ttyUSB2'
+OUTPUT='/tmp/awg-modem-clock.txt'
+LOCK='/tmp/awg-modem-clock.lock'
+
+mkdir "$LOCK" 2>/dev/null || exit 0
+reader_pid=''
+
+cleanup() {
+    if [ -n "$reader_pid" ]; then
+        kill "$reader_pid" 2>/dev/null || true
+        wait "$reader_pid" 2>/dev/null || true
+    fi
+    rm -f "$OUTPUT"
+    rmdir "$LOCK" 2>/dev/null || true
+}
+trap cleanup EXIT INT TERM
+
+attempt=0
+timestamp=''
+clock_line=''
+
+while [ "$attempt" -lt 12 ]; do
+    attempt=$((attempt + 1))
+    if [ ! -c "$PORT" ]; then
+        sleep 3
+        continue
+    fi
+
+    stty -F "$PORT" raw -echo -echoe -echok -echoctl -echoke 2>/dev/null || {
+        sleep 3
+        continue
+    }
+
+    rm -f "$OUTPUT"
+    cat "$PORT" >"$OUTPUT" &
+    reader_pid=$!
+    sleep 1
+    printf 'AT+CCLK?\r' >"$PORT"
+    sleep 2
+    kill "$reader_pid" 2>/dev/null || true
+    wait "$reader_pid" 2>/dev/null || true
+    reader_pid=''
+
+    clock_line="$(grep -m1 '^+CCLK:' "$OUTPUT" 2>/dev/null || true)"
+    timestamp="$(printf '%s\n' "$clock_line" | sed -n 's/.*"\([0-9][0-9]\)\/\([0-9][0-9]\)\/\([0-9][0-9]\),\([0-9][0-9]\):\([0-9][0-9]\):\([0-9][0-9]\).*/20\1-\2-\3 \4:\5:\6/p')"
+    [ -n "$timestamp" ] && break
+    sleep 3
+done
+
+[ -n "$timestamp" ] || {
+    logger -t awg-clock "Could not read LTE modem clock after $attempt attempts"
+    exit 1
+}
+
+date -u -s "$timestamp" >/dev/null || exit 1
+logger -t awg-clock "System UTC synchronized from LTE modem: $timestamp"
+logger -t awg-clock 'VPN interfaces were intentionally left untouched after clock synchronization'

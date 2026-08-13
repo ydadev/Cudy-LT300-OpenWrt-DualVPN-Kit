@@ -1,0 +1,20 @@
+# Secrets and device backups
+*.conf
+!examples/*.example.conf
+*.tar.gz
+*.backup
+*.bak
+router-credentials.md
+private-backups/
+
+# Generated release artifacts
+dist/
+*.zip
+
+# Local tooling and editors
+.idea/
+.vscode/
+Thumbs.db
+.DS_Store
+*.log
+*.tmp

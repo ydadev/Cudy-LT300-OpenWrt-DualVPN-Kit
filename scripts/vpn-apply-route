@@ -1,0 +1,63 @@
+#!/bin/sh
+set -u
+
+mode="${1:-$(uci -q get vpnmode.main.mode || echo awg)}"
+wg_if="$(uci -q get vpnmode.main.wg_if || echo wg0)"
+awg_if="$(uci -q get vpnmode.main.awg_if || echo awg0)"
+wwan_if="$(uci -q get vpnmode.main.wwan_if || echo wwan)"
+wg_admin_net="$(uci -q get vpnmode.main.wg_admin_net || echo 10.8.1.0/24)"
+awg_admin_net="$(uci -q get vpnmode.main.awg_admin_net || echo 10.8.2.0/23)"
+
+case "$mode" in
+    wg) iface="$wg_if" ;;
+    awg) iface="$awg_if" ;;
+    *) echo "Unknown VPN mode: $mode" >&2; exit 2 ;;
+esac
+
+wwan_status="$(ubus call "network.interface.$wwan_if" status 2>/dev/null || true)"
+wwan_up="$(printf '%s' "$wwan_status" | jsonfilter -e '@.up' 2>/dev/null || true)"
+[ "$wwan_up" = 'true' ] || { echo "$wwan_if is down" >&2; exit 1; }
+
+device="$(printf '%s' "$wwan_status" | jsonfilter -e '@.l3_device' 2>/dev/null || true)"
+gateway="$(printf '%s' "$wwan_status" | jsonfilter -e '@.route[0].nexthop' 2>/dev/null || true)"
+[ -n "$device" ] || { echo "Cannot determine device for $wwan_if" >&2; exit 1; }
+
+for endpoint in \
+    "$(uci -q get vpnmode.main.wg_endpoint || true)" \
+    "$(uci -q get vpnmode.main.awg_endpoint || true)"; do
+    [ -n "$endpoint" ] || continue
+    case "$endpoint" in
+        *[!0-9.]*|'')
+            command -v resolveip >/dev/null 2>&1 || continue
+            endpoint="$(resolveip -4 -t 5 "$endpoint" 2>/dev/null | head -n1 || true)"
+            ;;
+    esac
+    [ -n "$endpoint" ] || continue
+    if [ -n "$gateway" ]; then
+        ip -4 route replace "$endpoint/32" via "$gateway" dev "$device" metric 1
+    else
+        ip -4 route replace "$endpoint/32" dev "$device" metric 1
+    fi
+done
+
+up="$(ifstatus "$iface" 2>/dev/null | jsonfilter -e '@.up' 2>/dev/null || true)"
+if [ "$up" != 'true' ]; then
+    ifup "$iface" 2>/dev/null || true
+    attempts=0
+    while [ "$attempts" -lt 20 ]; do
+        up="$(ifstatus "$iface" 2>/dev/null | jsonfilter -e '@.up' 2>/dev/null || true)"
+        [ "$up" = 'true' ] && break
+        attempts=$((attempts + 1))
+        sleep 1
+    done
+fi
+[ "$up" = 'true' ] || { echo "$iface did not become ready" >&2; exit 1; }
+
+# Preserve symmetric replies to remote administrators regardless of which VPN
+# currently owns the default route.
+ip link show "$wg_if" >/dev/null 2>&1 && ip -4 route replace "$wg_admin_net" dev "$wg_if" metric 5 || true
+ip link show "$awg_if" >/dev/null 2>&1 && ip -4 route replace "$awg_admin_net" dev "$awg_if" metric 5 || true
+
+ip -4 route replace default dev "$iface" metric 10
+ip -6 route replace default dev "$iface" metric 10 2>/dev/null || true
+exit 0

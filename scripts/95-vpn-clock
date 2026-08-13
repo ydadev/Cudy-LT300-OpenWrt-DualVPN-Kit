@@ -1,0 +1,16 @@
+#!/bin/sh
+
+[ "$ACTION" = 'ifup' ] || exit 0
+[ "$INTERFACE" = 'wwan' ] || exit 0
+
+STAMP='/tmp/vpn-modem-time-synced'
+[ -e "$STAMP" ] && exit 0
+
+(
+    if /usr/sbin/awg-sync-modem-time; then
+        touch "$STAMP"
+        /usr/sbin/vpn-apply-route 2>/dev/null || true
+    fi
+) &
+
+exit 0

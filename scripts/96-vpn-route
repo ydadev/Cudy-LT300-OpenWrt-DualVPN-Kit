@@ -1,0 +1,12 @@
+#!/bin/sh
+
+[ "$ACTION" = 'ifup' ] || exit 0
+wwan_if="$(uci -q get vpnmode.main.wwan_if || echo wwan)"
+[ "$INTERFACE" = "$wwan_if" ] || exit 0
+
+(
+    sleep 5
+    /usr/sbin/vpn-apply-route
+) &
+
+exit 0

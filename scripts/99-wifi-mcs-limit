@@ -1,0 +1,7 @@
+#!/bin/sh
+
+# Reapply the MT7603 one-stream rate mask whenever the AP netdev is created.
+[ "$ACTION" = "add" ] || exit 0
+[ "$INTERFACE" = "phy0-ap0" ] || exit 0
+
+/usr/sbin/wifi-mcs-limit >/dev/null 2>&1 &
