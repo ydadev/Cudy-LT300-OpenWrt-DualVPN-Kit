@@ -1,0 +1,141 @@
+#!/bin/sh
+set -u
+
+LOCK_DIR='/tmp/vpn-switch.lock'
+PROBE_ROUTE_IFACE=''
+wg_if="$(uci -q get vpnmode.main.wg_if || echo wg0)"
+awg_if="$(uci -q get vpnmode.main.awg_if || echo awg0)"
+wwan_if="$(uci -q get vpnmode.main.wwan_if || echo wwan)"
+probe_ip="$(uci -q get vpnmode.main.probe_ip || echo 1.1.1.1)"
+
+latest_handshake() {
+    case "$1" in
+        wg) wg show "$wg_if" latest-handshakes 2>/dev/null | awk 'NR == 1 { print $2 }' ;;
+        awg) awg show "$awg_if" latest-handshakes 2>/dev/null | awk 'NR == 1 { print $2 }' ;;
+    esac
+}
+
+handshake_exists() {
+    last="$(latest_handshake "$1")"
+    case "$last" in ''|*[!0-9]*) return 1 ;; esac
+    [ "$last" -gt 0 ]
+}
+
+cleanup_switch() {
+    if [ -n "$PROBE_ROUTE_IFACE" ]; then
+        ip -4 route del "$probe_ip/32" dev "$PROBE_ROUTE_IFACE" 2>/dev/null || true
+    fi
+    rmdir "$LOCK_DIR" 2>/dev/null || true
+}
+
+wait_for_tunnel() {
+    mode="$1"
+    iface="$2"
+    probe_route_added='0'
+
+    case "$probe_ip" in
+        ''|*[!0-9.]*)
+            echo "Invalid IPv4 probe_ip: $probe_ip" >&2
+            return 1
+            ;;
+    esac
+
+    wg_endpoint="$(uci -q get vpnmode.main.wg_endpoint || true)"
+    awg_endpoint="$(uci -q get vpnmode.main.awg_endpoint || true)"
+    [ "$probe_ip" != "$wg_endpoint" ] && [ "$probe_ip" != "$awg_endpoint" ] || {
+        echo 'probe_ip must not be equal to a VPN endpoint.' >&2
+        return 1
+    }
+
+    # Keep the working default route until preflight succeeds. Only the
+    # control address is temporarily routed through the target tunnel.
+    if ip -4 route add "$probe_ip/32" dev "$iface" metric 2; then
+        probe_route_added='1'
+        PROBE_ROUTE_IFACE="$iface"
+    else
+        return 1
+    fi
+
+    attempts=0
+    while [ "$attempts" -lt 20 ]; do
+        if handshake_exists "$mode" && ping -I "$iface" -c 1 -W 3 "$probe_ip" >/dev/null 2>&1; then
+            [ "$probe_route_added" = '1' ] && ip -4 route del "$probe_ip/32" dev "$iface" 2>/dev/null || true
+            PROBE_ROUTE_IFACE=''
+            return 0
+        fi
+        attempts=$((attempts + 1))
+        sleep 1
+    done
+    [ "$probe_route_added" = '1' ] && ip -4 route del "$probe_ip/32" dev "$iface" 2>/dev/null || true
+    PROBE_ROUTE_IFACE=''
+    return 1
+}
+
+show_status() {
+    configured_mode="$(uci -q get vpnmode.main.mode || echo awg)"
+    case "$configured_mode" in
+        wg) configured='WireGuard' ;;
+        awg) configured='AmneziaWG' ;;
+        *) configured="invalid ($configured_mode)" ;;
+    esac
+    echo "Configured mode: $configured"
+    echo 'Default routes:'
+    ip -4 route show default
+    echo 'WireGuard:'
+    printf 'up: '
+    ifstatus "$wg_if" 2>/dev/null | jsonfilter -e '@.up' 2>/dev/null || true
+    wg show "$wg_if" latest-handshakes 2>/dev/null || true
+    wg show "$wg_if" transfer 2>/dev/null || true
+    echo 'AmneziaWG:'
+    printf 'up: '
+    ifstatus "$awg_if" 2>/dev/null | jsonfilter -e '@.up' 2>/dev/null || true
+    awg show "$awg_if" latest-handshakes 2>/dev/null || true
+    awg show "$awg_if" transfer 2>/dev/null || true
+}
+
+case "${0##*/}" in
+    vpn-use-wg) target='wg' ;;
+    vpn-use-awg) target='awg' ;;
+    vpn-status) target='status' ;;
+    *) target="${1:-status}" ;;
+esac
+
+case "$target" in
+    status) show_status; exit 0 ;;
+    wg) target_mode='wg'; target_if="$wg_if"; old_mode='awg'; old_if="$awg_if" ;;
+    awg) target_mode='awg'; target_if="$awg_if"; old_mode='wg'; old_if="$wg_if" ;;
+    *) echo "Usage: $0 {wg|awg|status}" >&2; exit 2 ;;
+esac
+
+if ! mkdir "$LOCK_DIR" 2>/dev/null; then
+    echo 'Another VPN switch is already running.' >&2
+    exit 1
+fi
+trap cleanup_switch EXIT INT TERM
+
+wwan_up="$(ubus call "network.interface.$wwan_if" status 2>/dev/null | jsonfilter -e '@.up' 2>/dev/null || true)"
+[ "$wwan_up" = 'true' ] || { echo "$wwan_if is down; switch aborted." >&2; exit 1; }
+
+current_mode="$(uci -q get vpnmode.main.mode || echo awg)"
+case "$current_mode" in
+    wg|awg) /usr/sbin/vpn-apply-route "$current_mode" >/dev/null 2>&1 || true ;;
+esac
+
+ifup "$target_if" 2>/dev/null || true
+if ! wait_for_tunnel "$target_mode" "$target_if"; then
+    echo "Target tunnel $target_if failed the handshake/traffic test; current mode was not changed." >&2
+    logger -t vpn-switch "Preflight failed for $target_if; keeping current mode"
+    exit 1
+fi
+
+if ! /usr/sbin/vpn-apply-route "$target"; then
+    echo "Route activation for $target_if failed; restoring $old_if." >&2
+    /usr/sbin/vpn-apply-route "$old_mode" 2>/dev/null || true
+    exit 1
+fi
+
+uci set vpnmode.main.mode="$target"
+uci commit vpnmode
+logger -t vpn-switch "Active VPN changed to $target_if"
+echo "VPN switched to $target_if successfully."
+show_status

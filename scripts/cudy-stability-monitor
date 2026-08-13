@@ -1,0 +1,98 @@
+#!/bin/sh
+
+LOG='/tmp/cudy-stability.log'
+EVENT_LOG='/tmp/cudy-stability-events.log'
+INTERVAL="${INTERVAL:-10}"
+PROBE="$(uci -q get vpnmode.main.probe_ip || echo 1.1.1.1)"
+event_pid=''
+
+cleanup() {
+    if [ -n "$event_pid" ]; then
+        kill "$event_pid" 2>/dev/null || true
+        wait "$event_pid" 2>/dev/null || true
+    fi
+}
+trap cleanup EXIT INT TERM
+
+rotate_if_needed() {
+    file="$1"
+    limit="$2"
+    keep="$3"
+    [ -f "$file" ] || return 0
+    size="$(wc -c <"$file" 2>/dev/null || echo 0)"
+    [ "$size" -lt "$limit" ] && return 0
+    tail -n "$keep" "$file" >"$file.new" 2>/dev/null && mv "$file.new" "$file"
+}
+
+boot_id="$(cat /proc/sys/kernel/random/boot_id 2>/dev/null || echo unknown)"
+{
+    echo "=== MONITOR START boot_id=$boot_id ==="
+    date -u '+utc=%Y-%m-%dT%H:%M:%SZ' 2>/dev/null || date
+    uname -a
+} >>"$LOG"
+
+# Keep the live system log in a separate RAM-only file. BusyBox logread writes
+# directly so no unsupported GNU grep/sed buffering options are required.
+logread -f >>"$EVENT_LOG" 2>/dev/null &
+event_pid=$!
+
+ticks=0
+while :; do
+    ticks=$((ticks + 1))
+    uptime_s="$(cut -d. -f1 /proc/uptime 2>/dev/null || echo 0)"
+    now_epoch="$(date +%s 2>/dev/null || echo 0)"
+    load="$(cut -d' ' -f1-3 /proc/loadavg 2>/dev/null || echo unknown)"
+    mem_kb="$(awk '/^MemAvailable:/ { print $2; found=1 } END { if (!found) print 0 }' /proc/meminfo 2>/dev/null)"
+    conntrack="$(cat /proc/sys/net/netfilter/nf_conntrack_count 2>/dev/null || echo 0)"
+    mode="$(uci -q get vpnmode.main.mode || echo unknown)"
+    case "$mode" in
+        wg) vpn_if="$(uci -q get vpnmode.main.wg_if || echo wg0)"; vpn_cmd='wg' ;;
+        awg) vpn_if="$(uci -q get vpnmode.main.awg_if || echo awg0)"; vpn_cmd='awg' ;;
+        *) vpn_if='unknown'; vpn_cmd='' ;;
+    esac
+    wwan_if="$(uci -q get vpnmode.main.wwan_if || echo wwan)"
+    wwan_up="$(ifstatus "$wwan_if" 2>/dev/null | jsonfilter -e '@.up' 2>/dev/null || echo false)"
+    vpn_up="$(ifstatus "$vpn_if" 2>/dev/null | jsonfilter -e '@.up' 2>/dev/null || echo false)"
+    default_dev="$(ip -4 route show default 2>/dev/null | awk 'NR == 1 { for (i=1; i<=NF; i++) if ($i == "dev") { print $(i+1); exit } }')"
+    wifi_if="$(iw dev 2>/dev/null | awk '$1 == "Interface" && $2 ~ /ap/ { print $2; exit }')"
+    [ -n "$wifi_if" ] || wifi_if="$(iw dev 2>/dev/null | awk '$1 == "Interface" { print $2; exit }')"
+    wifi_state='missing'
+    stations=0
+    tx_retries=0
+    tx_failed=0
+    if [ -n "$wifi_if" ]; then
+        wifi_state="$(cat "/sys/class/net/$wifi_if/operstate" 2>/dev/null || echo unknown)"
+        station_stats="$(iw dev "$wifi_if" station dump 2>/dev/null | awk '
+            /^Station / { stations++ }
+            /^[ \t]+tx retries:/ { retries += $3 }
+            /^[ \t]+tx failed:/ { failed += $3 }
+            END { printf "%d %d %d", stations, retries, failed }
+        ')"
+        set -- $station_stats
+        stations="${1:-0}"
+        tx_retries="${2:-0}"
+        tx_failed="${3:-0}"
+    fi
+    handshake="0"
+    if [ -n "$vpn_cmd" ] && command -v "$vpn_cmd" >/dev/null 2>&1; then
+        handshake="$($vpn_cmd show "$vpn_if" latest-handshakes 2>/dev/null | awk 'BEGIN { newest=0 } $2 > newest { newest=$2 } END { print newest }')"
+        [ -n "$handshake" ] || handshake=0
+    fi
+    probe='skip'
+    if [ $((ticks % 3)) -eq 1 ] && [ "$vpn_up" = 'true' ]; then
+        if ping -I "$vpn_if" -c 1 -W 2 "$PROBE" >/dev/null 2>&1; then
+            probe='ok'
+        else
+            probe='fail'
+        fi
+    fi
+    printf 'uptime=%s epoch=%s load=%s mem_kb=%s ct=%s mode=%s wwan=%s vpn_if=%s vpn=%s default=%s wifi_if=%s wifi=%s sta=%s retries=%s failed=%s handshake=%s probe=%s\n' \
+        "$uptime_s" "$now_epoch" "$load" "$mem_kb" "$conntrack" "$mode" "$wwan_up" "$vpn_if" "$vpn_up" "${default_dev:-none}" \
+        "${wifi_if:-none}" "$wifi_state" "$stations" "$tx_retries" "$tx_failed" "$handshake" "$probe" >>"$LOG"
+
+    if [ $((ticks % 30)) -eq 0 ]; then
+        rotate_if_needed "$LOG" 524288 2500
+        rotate_if_needed "$EVENT_LOG" 524288 2500
+    fi
+    sleep "$INTERVAL"
+done

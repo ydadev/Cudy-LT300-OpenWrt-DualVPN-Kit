@@ -1,0 +1,8 @@
+#!/bin/sh /etc/rc.common
+
+START=99
+USE_PROCD=1
+
+start_service() {
+	/usr/sbin/wifi-mcs-limit >/dev/null 2>&1 &
+}

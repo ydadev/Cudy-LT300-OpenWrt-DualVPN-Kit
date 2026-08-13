@@ -1,0 +1,42 @@
+name: Validate kit
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verify published checksums
+        run: sha256sum --check checksums/SHA256SUMS
+
+      - name: Check shell syntax
+        run: find scripts -type f -exec sh -n {} \;
+
+      - name: Check Markdown links
+        run: python3 tools/check-markdown-links.py .
+
+      - name: Reject private key material
+        shell: python
+        run: |
+          import pathlib, re, sys
+          patterns = [
+              re.compile(r'^\s*(?:PrivateKey|PresharedKey)\s*=\s*(?!REPLACE_WITH_)[A-Za-z0-9+/]{40,}={0,2}\s*$', re.M),
+              re.compile(r"^\s*option\s+(?:private_key|preshared_key|password)\s+'(?!REPLACE_WITH_)[^']+'\s*$", re.M),
+          ]
+          bad = []
+          for path in pathlib.Path('.').rglob('*'):
+              if not path.is_file() or '.git' in path.parts or path.suffix not in {'.md', '.sh', '.conf', '.example', '.py', '.ps1', '.yml', '.yaml'}:
+                  continue
+              text = path.read_text(encoding='utf-8', errors='replace')
+              if any(pattern.search(text) for pattern in patterns):
+                  bad.append(str(path))
+          if bad:
+              print('Possible secrets:', *bad, sep='\n', file=sys.stderr)
+              sys.exit(1)

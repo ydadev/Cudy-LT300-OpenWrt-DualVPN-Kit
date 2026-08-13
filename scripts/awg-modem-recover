@@ -1,0 +1,47 @@
+#!/bin/sh
+set -u
+
+PORT='/dev/ttyUSB2'
+LOCK='/tmp/awg-modem-recover.lock'
+OUTPUT='/tmp/awg-modem-recover.txt'
+
+mkdir "$LOCK" 2>/dev/null || exit 0
+reader_pid=''
+
+cleanup() {
+    if [ -n "$reader_pid" ]; then
+        kill "$reader_pid" 2>/dev/null || true
+        wait "$reader_pid" 2>/dev/null || true
+    fi
+    rm -f "$OUTPUT"
+    rmdir "$LOCK" 2>/dev/null || true
+}
+trap cleanup EXIT INT TERM
+
+logger -t awg-watchdog 'Starting LTE radio re-registration'
+
+[ -c "$PORT" ] || {
+    logger -t awg-watchdog 'LTE AT port is unavailable'
+    exit 1
+}
+
+stty -F "$PORT" raw -echo -echoe -echok -echoctl -echoke || exit 1
+rm -f "$OUTPUT"
+cat "$PORT" >"$OUTPUT" &
+reader_pid=$!
+sleep 1
+printf 'AT+CFUN=0\r' >"$PORT"
+sleep 6
+printf 'AT+CFUN=1\r' >"$PORT"
+sleep 10
+kill "$reader_pid" 2>/dev/null || true
+wait "$reader_pid" 2>/dev/null || true
+reader_pid=''
+
+sleep 25
+ifdown wwan 2>/dev/null || true
+sleep 3
+ifup wwan
+sleep 20
+/usr/sbin/awg-sync-modem-time
+logger -t awg-watchdog 'LTE radio re-registration completed'

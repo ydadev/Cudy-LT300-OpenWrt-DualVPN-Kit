@@ -1,0 +1,27 @@
+#!/bin/sh
+
+# Cudy LT300 v3 / MT7628 workaround:
+# Keep 802.11n enabled but restrict AP transmissions to one spatial stream.
+# This reduces load on the MT7603 TX path. On the tested router it is used
+# together with the patched driver and txpower=15; the mask alone was not enough.
+
+IFACE="phy0-ap0"
+TAG="wifi-mcs-limit"
+
+apply_limit() {
+	count=0
+	while [ "$count" -lt 30 ]; do
+		status="$(ubus call "hostapd.$IFACE" get_status 2>/dev/null | jsonfilter -e '@.status' 2>/dev/null || true)"
+		if [ "$status" = 'ENABLED' ] && iw dev "$IFACE" set bitrates ht-mcs-2.4 0 1 2 3 4 5 6 7; then
+			logger -t "$TAG" "Applied HT MCS0-7 TX mask to $IFACE"
+			exit 0
+		fi
+		count=$((count + 1))
+		sleep 1
+	done
+
+	logger -t "$TAG" "Failed to apply HT MCS0-7 TX mask after AP became ready on $IFACE"
+	exit 1
+}
+
+apply_limit

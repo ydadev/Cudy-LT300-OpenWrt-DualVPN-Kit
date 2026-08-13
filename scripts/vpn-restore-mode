@@ -1,0 +1,44 @@
+#!/bin/sh
+
+# One-shot boot recovery for the saved VPN mode. This is not a failover
+# watchdog: it exits after the selected tunnel becomes the default route.
+
+TAG='vpn-restore-mode'
+ATTEMPTS=12
+
+sleep 15
+
+count=0
+while [ "$count" -lt "$ATTEMPTS" ]; do
+	mode="$(uci -q get vpnmode.main.mode || echo wg)"
+	case "$mode" in
+		wg)
+			iface="$(uci -q get vpnmode.main.wg_if || echo wg0)"
+			command='/usr/sbin/vpn-use-wg'
+			;;
+		awg)
+			iface="$(uci -q get vpnmode.main.awg_if || echo awg0)"
+			command='/usr/sbin/vpn-use-awg'
+			;;
+		*)
+			logger -t "$TAG" "Invalid saved VPN mode: $mode"
+			exit 2
+			;;
+	esac
+
+	if ip -4 route show default | grep -q "^default dev $iface "; then
+		logger -t "$TAG" "Saved VPN mode $mode is already active on $iface"
+		exit 0
+	fi
+
+	if "$command" >/tmp/vpn-restore-mode.log 2>&1; then
+		logger -t "$TAG" "Restored saved VPN mode $mode on $iface"
+		exit 0
+	fi
+
+	count=$((count + 1))
+	sleep 10
+done
+
+logger -t "$TAG" "Failed to restore saved VPN mode after $ATTEMPTS attempts"
+exit 1
