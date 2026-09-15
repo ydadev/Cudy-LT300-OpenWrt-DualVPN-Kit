@@ -54,6 +54,11 @@ APK, firmware и `.ko` из этого репозитория нельзя ус�
 `packages/`, `drivers/`, `scripts/`, `checksums/` и двух личных конфигов только в
 `/tmp` основная установка выполняется в два этапа:
 
+> При переходе со старой OpenWrt не переносите её `/etc/config/network`:
+> OpenWrt 25.12.5 создаёт для LT300 v3 собственную схему LAN/VLAN. Перед
+> запуском первого этапа задайте защищённые SSID и пароль Wi-Fi — скрипт
+> включит радиомодуль. Оба шага подробно описаны в быстром руководстве.
+
 ```sh
 /tmp/Cudy-LT300-OpenWrt-DualVPN-Kit/scripts/quick-setup-1-prepare.sh \
   /tmp/wireguard.conf /tmp/amneziawg.conf

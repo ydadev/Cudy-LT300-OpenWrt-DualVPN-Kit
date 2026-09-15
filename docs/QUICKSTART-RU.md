@@ -32,9 +32,12 @@ kernel:       6.12.94
 После него можно ставить официальный sysupgrade. Следуйте странице устройства
 OpenWrt и инструкции Cudy; этот репозиторий не автоматизирует OEM-переход.
 
-Если на роутере уже OpenWrt 24.10.x или 25.12.x, используйте LuCI
-**System → Backup / Flash Firmware** либо `sysupgrade` только после проверки
-board и SHA256.
+Если на роутере уже OpenWrt, используйте LuCI **System → Backup / Flash
+Firmware** либо `sysupgrade` только после проверки board, версии, типа образа
+и SHA256. Переход с 23.05.x или старше на 25.12.x [официально не поддержан
+обычным обновлением с переносом настроек](https://openwrt.org/releases/25.12/notes-25.12.3):
+не восстанавливайте старый backup поверх новой системы. Для иных исходных
+версий также заранее изучите примечания к выпуску и страницу устройства.
 
 ## 3. Проверить устройство и сохранить backup
 
@@ -79,9 +82,51 @@ sysupgrade -T /tmp/openwrt-25.12.5-ramips-mt76x8-cudy_lt300-v3-squashfs-sysupgra
 sysupgrade -n /tmp/openwrt-25.12.5-ramips-mt76x8-cudy_lt300-v3-squashfs-sysupgrade.bin
 ```
 
-`-n` означает чистую установку без сохранения старых настроек. Не используйте
-`-F`. Не отключайте питание. Если ранее зависал `rmmod mt7603e`, сначала сделайте
-обычный reboot и только затем запускайте sysupgrade.
+`-n` означает чистую установку без сохранения старых настроек. `-F` не
+используйте вообще; не добавляйте и `-f <backup.tar.gz>` к `-n`: указание
+архива через `-f` всё равно восстановит содержащиеся в нём файлы. Особенно
+опасно переносить
+`/etc/config/network` со старой сборки. Держите полный backup **на компьютере**
+только для выборочного восстановления данных после первого входа. Не отключайте
+питание. Если ранее зависал `rmmod mt7603e`, сначала сделайте обычный reboot и
+только затем запускайте sysupgrade.
+
+На проверенном LT300 v3 со старой OpenWrt мост LAN использовал `eth0` без
+настройки switch/VLAN. В штатной схеме OpenWrt 25.12.5 этот же роутер имеет
+**LAN `eth0.2`, WAN `eth0.1`**, а разделы `switch` и `switch_vlan` создаются
+заново по `/etc/board.json`. Перенос старого `network` оставил роутер без
+доступа по Ethernet после первого reboot. Не переписывайте новый файл
+`/etc/config/network` старым целиком — меняйте только нужные параметры через
+`uci`, оставляя созданные новой версией интерфейсы и VLAN.
+
+Если доступ потерян после обновления, сначала проверьте и заводской адрес
+`192.168.1.1`, и ранее назначенный адрес, переключая **только адрес Ethernet
+компьютера** в соответствующую подсеть. Если оба недоступны, попробуйте
+[failsafe OpenWrt](https://openwrt.org/docs/guide-user/troubleshooting/failsafe_and_factory_reset):
+включите роутер и **кратко** нажмите Reset, когда системный индикатор начал
+мигать. Не удерживайте Reset во время подачи питания: у Cudy это может вызвать
+загрузчик/TFTP-recovery. В failsafe Wi-Fi и DHCP выключены, LAN отвечает на
+`192.168.1.1`; задайте Ethernet компьютеру, например, `192.168.1.20/24`.
+После SSH выполните:
+
+```sh
+mount_root
+mv /etc/config/network /etc/config/network.before-vlan-recovery
+/bin/board_detect
+/bin/config_generate
+uci set network.lan.ipaddr='192.168.1.1'  # или ваш желаемый LAN-адрес
+uci commit network
+uci -q get network.lan.ipaddr
+uci show network | grep -E 'eth0\.1|eth0\.2|switch_vlan'
+sync
+reboot
+```
+
+Генератор берёт схему портов из **текущего** `/etc/board.json`; указанная
+команда `mv` сохраняет старый файл на роутере для диагностики. После reboot
+переведите Ethernet компьютера в подсеть выбранного LAN-адреса и проверьте SSH.
+Если failsafe не запускается, не повторяйте прошивку вслепую — переходите к
+официальной процедуре восстановления Cudy.
 
 ## 5. Первый вход и LTE
 
@@ -123,6 +168,9 @@ scp -O .\my-amneziawg.conf root@<ROUTER_LAN_IP>:/tmp/amneziawg.conf
 
 Firmware в `/tmp` для обычной настройки передавать не нужно — это экономит
 flash. Установочные файлы можно удалить после успешной настройки.
+`checksums/SHA256SUMS` допускает Windows-окончания строк CRLF: установщик
+убирает завершающий `\r` при поиске записи, а затем проверяет реальный SHA256
+каждого APK. Не отключайте эту проверку, если установка остановилась.
 
 ## 7. Проверить имена секций Wi-Fi
 
@@ -134,6 +182,23 @@ uci show wireless | grep '=wifi-iface'
 может называться `default_radio0`. Если третий аргумент stage 1 не задан, скрипт
 возьмёт первую `wifi-iface` автоматически.
 
+**До stage 1** установите своё имя Wi-Fi и пароль: скрипт включит радио, а
+после чистой установки штатная `wifi-iface` может ещё не иметь шифрования.
+Не переносите весь `network` из старого бэкапа ради сохранения Wi-Fi.
+
+```sh
+WIFI_IFACE="$(uci show wireless | sed -n 's/^wireless\.\([^=]*\)=wifi-iface$/\1/p' | head -n1)"
+test -n "$WIFI_IFACE"
+uci set "wireless.$WIFI_IFACE.ssid=<YOUR_WIFI_SSID>"
+uci set "wireless.$WIFI_IFACE.encryption=sae-mixed"
+uci set "wireless.$WIFI_IFACE.key=<STRONG_WIFI_PASSWORD>"
+uci commit wireless
+uci -q get "wireless.$WIFI_IFACE.encryption"
+```
+
+На том же LT300 v3 можно выборочно взять старые SSID/пароль из закрытого
+бэкапа, проверив совпадение пути радио; архив и ключи храните только закрыто.
+
 ## 8. Этап 1: пакеты, VPN-конфиги, Wi-Fi и драйвер
 
 ```sh
@@ -141,8 +206,7 @@ cd /tmp/Cudy-LT300-OpenWrt-DualVPN-Kit
 chmod 755 scripts/*
 scripts/quick-setup-1-prepare.sh \
   /tmp/wireguard.conf \
-  /tmp/amneziawg.conf \
-  wifinet0
+  /tmp/amneziawg.conf
 sync
 reboot
 ```
@@ -153,7 +217,9 @@ Stage 1:
 2. создаёт полный backup;
 3. проверяет SHA256 каждого APK;
 4. устанавливает WG/AWG офлайн;
-5. импортирует конфиги без печати ключей;
+5. импортирует конфиги без печати ключей, endpoint и VPN-адресов; IP-адреса
+   из поля DNS направляет резолверу, а имена доменов использует как поисковые
+   домены (не как DNS-серверы); необязательные AWG-поля можно не задавать;
 6. сохраняет профиль HT20, U-APSD off, DTIM=1 и 15 dBm;
 7. ставит MCS0–7 hotplug;
 8. сохраняет штатные Wi-Fi-модули и устанавливает patched MT7603;

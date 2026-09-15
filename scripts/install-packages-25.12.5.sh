@@ -20,7 +20,7 @@ set -- "$PACKAGE_DIR"/*.apk
 
 for package in "$@"; do
     relative="packages/${package##*/}"
-    expected="$(awk -v file="$relative" '$2 == file { print $1; exit }' "$CHECKSUM_FILE")"
+    expected="$(awk -v file="$relative" '{ entry=$2; sub(/\r$/, "", entry); if (entry == file) { print $1; exit } }' "$CHECKSUM_FILE")"
     [ -n "$expected" ] || { echo "ERROR: checksum entry is missing: $relative" >&2; exit 1; }
     printf '%s  %s\n' "$expected" "$package" | sha256sum -c -
 done

@@ -78,6 +78,14 @@ uci -q delete "network.$IFACE.addresses" || true
 for interface_address in $(printf '%s' "$ADDRESS" | tr ',' ' '); do
     [ -n "$interface_address" ] && uci add_list "network.$IFACE.addresses=$interface_address"
 done
+DNS_IPS=''
+for dns_entry in $(printf '%s' "$DNS" | tr ',' ' '); do
+    case "$dns_entry" in
+        *:*) uci add_list "network.$IFACE.dns=$dns_entry"; DNS_IPS="$DNS_IPS $dns_entry" ;;
+        *[!0-9.]*) uci add_list "network.$IFACE.dns_search=$dns_entry" ;;
+        *) uci add_list "network.$IFACE.dns=$dns_entry"; DNS_IPS="$DNS_IPS $dns_entry" ;;
+    esac
+done
 uci set "network.$IFACE.mtu=1420"
 uci set "network.$IFACE.metric=10"
 uci set "network.$IFACE.nohostroute=1"
@@ -85,7 +93,9 @@ uci set "network.$IFACE.nohostroute=1"
 set_optional() {
     option="$1"
     value="$2"
-    [ -n "$value" ] && uci set "network.$IFACE.$option=$value"
+    if [ -n "$value" ]; then
+        uci set "network.$IFACE.$option=$value"
+    fi
 }
 
 set_optional awg_jc "$JC"
@@ -142,10 +152,10 @@ for forwarding in $(uci show firewall | sed -n 's/^\(firewall\.[^=]*\)=forwardin
     [ "$src" = 'lan' ] && [ "$dest" = 'wan' ] && uci set "$forwarding.enabled=0"
 done
 
-if [ -n "$DNS" ]; then
+if [ -n "$DNS_IPS" ]; then
     uci set dhcp.@dnsmasq[0].noresolv='1'
     uci -q delete dhcp.@dnsmasq[0].server || true
-    for server in $(printf '%s' "$DNS" | tr ',' ' '); do
+    for server in $DNS_IPS; do
         [ -n "$server" ] && uci add_list "dhcp.@dnsmasq[0].server=$server"
     done
 fi
@@ -155,8 +165,7 @@ uci commit firewall
 uci commit dhcp
 
 echo 'Configuration committed. Secrets are intentionally not printed.'
-echo "Endpoint: $ENDPOINT_HOST:$ENDPOINT_PORT"
-echo "Interface address: $ADDRESS"
+echo 'Endpoint and interface address are intentionally not printed.'
 echo 'Apply with:'
 echo '  /etc/init.d/network restart'
 echo '  /etc/init.d/firewall restart'
