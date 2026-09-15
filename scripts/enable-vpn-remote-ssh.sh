@@ -1,8 +1,8 @@
 #!/bin/sh
 set -eu
 
-WG_ADMIN_NET="${1:-10.8.1.0/24}"
-AWG_ADMIN_NET="${2:-10.8.2.0/23}"
+WG_ADMIN_NET="${1:-}"
+AWG_ADMIN_NET="${2:-}"
 WG_IF="${3:-wg0}"
 AWG_IF="${4:-awg0}"
 

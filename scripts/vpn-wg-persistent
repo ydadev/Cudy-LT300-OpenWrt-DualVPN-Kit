@@ -1,0 +1,91 @@
+#!/bin/sh
+# Optional fixed-WireGuard mode. It never selects the standby tunnel.
+set -u
+
+INTERVAL=30
+STALE_SECONDS=180
+FAILURES_BEFORE_RESTART=3
+RESTART_COOLDOWN=180
+
+wg_if="$(uci -q get vpnmode.main.wg_if || echo wg0)"
+transport_if="$(uci -q get vpnmode.main.transport_if || uci -q get vpnmode.main.wwan_if || echo wwan)"
+probe_ip="$(uci -q get vpnmode.main.probe_ip || true)"
+failures=0
+last_restart=0
+last_state=''
+
+report() {
+    state="$1"
+    message="$2"
+    if [ "$state" != "$last_state" ]; then
+        logger -t vpn-wg-persistent "$message"
+        last_state="$state"
+    fi
+}
+
+while :; do
+    mode="$(uci -q get vpnmode.main.mode || true)"
+    failover="$(uci -q get vpnmode.main.auto_failover || true)"
+    if [ "$mode" != 'wg' ] || [ "$failover" != '0' ]; then
+        uci set vpnmode.main.mode='wg'
+        uci set vpnmode.main.auto_failover='0'
+        uci commit vpnmode
+        logger -t vpn-wg-persistent 'Restored fixed WireGuard mode; automatic failover stays disabled'
+    fi
+
+    transport_up="$(ifstatus "$transport_if" 2>/dev/null | jsonfilter -e '@.up' 2>/dev/null || true)"
+    if [ "$transport_up" != 'true' ]; then
+        report 'transport-down' "$transport_if is down; waiting while WireGuard remains selected"
+        failures=0
+        sleep "$INTERVAL"
+        continue
+    fi
+
+    wg_up="$(ifstatus "$wg_if" 2>/dev/null | jsonfilter -e '@.up' 2>/dev/null || true)"
+    if [ "$wg_up" != 'true' ]; then
+        report 'wg-down' "$wg_if is down; requesting ifup"
+        ifup "$wg_if" >/dev/null 2>&1 || true
+        /usr/sbin/vpn-apply-route wg >/dev/null 2>&1 || true
+        sleep "$INTERVAL"
+        continue
+    fi
+
+    selected="$(ip -4 route show default | awk -v iface="$wg_if" '$1 == "default" && $2 == "dev" && $3 == iface { print $3; exit }')"
+    if [ "$selected" != "$wg_if" ]; then
+        /usr/sbin/vpn-apply-route wg >/dev/null 2>&1 || true
+    fi
+
+    now="$(date +%s)"
+    handshake="$(wg show "$wg_if" latest-handshakes 2>/dev/null | awk 'NR == 1 { print $2 }')"
+    case "$handshake" in ''|*[!0-9]*) handshake=0 ;; esac
+    age=$((now - handshake))
+
+    if [ "$handshake" -gt 0 ] && [ "$age" -ge 0 ] && [ "$age" -le "$STALE_SECONDS" ]; then
+        failures=0
+        report 'healthy' "$wg_if handshake is fresh; WireGuard is selected"
+        sleep "$INTERVAL"
+        continue
+    fi
+
+    # Clock correction after boot can distort handshake age; verify traffic too.
+    if [ -n "$probe_ip" ] && ping -I "$wg_if" -c 1 -W 3 "$probe_ip" >/dev/null 2>&1; then
+        failures=0
+        report 'healthy' "$wg_if passes traffic; WireGuard is selected"
+        sleep "$INTERVAL"
+        continue
+    fi
+
+    failures=$((failures + 1))
+    report 'suspect' "$wg_if handshake/traffic test failed; retrying WireGuard without failover"
+    if [ "$failures" -ge "$FAILURES_BEFORE_RESTART" ] && [ $((now - last_restart)) -ge "$RESTART_COOLDOWN" ]; then
+        logger -t vpn-wg-persistent "$wg_if failed $failures consecutive checks; cycling only WireGuard"
+        ifdown "$wg_if" >/dev/null 2>&1 || true
+        sleep 2
+        ifup "$wg_if" >/dev/null 2>&1 || true
+        /usr/sbin/vpn-apply-route wg >/dev/null 2>&1 || true
+        last_restart="$now"
+        failures=0
+        last_state=''
+    fi
+    sleep "$INTERVAL"
+done

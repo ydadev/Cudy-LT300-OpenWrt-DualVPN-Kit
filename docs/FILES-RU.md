@@ -13,6 +13,7 @@
 - `docs/QUICKSTART-RU.md` — кратчайшее повторение на таком же LT300 v3.
 - `docs/INSTALL-RU.md` — ручная пошаговая установка и объяснение команд.
 - `docs/ARCHITECTURE-RU.md` — маршруты, firewall, DNS, время и переключение.
+- `docs/FIXED-WG-RU.md` — необязательный постоянный WG, замена профиля и reboot-тест.
 - `docs/WIFI-MT7603-RU.md` — расследование Wi-Fi, patched-драйвер и откат.
 - `docs/TROUBLESHOOTING-RU.md` — диагностика типовых отказов.
 - `docs/OTHER-DEVICES-RU.md` — правила переноса на другую модель.
@@ -59,12 +60,14 @@
 - `vpn-apply-route` — host route endpoint через LTE и default через активный VPN.
 - `vpn-restore-mode` + init/hotplug — одноразовое восстановление сохранённого режима
   после boot; это не автоматический failover.
+- `enable-persistent-wg.sh`, `vpn-wg-persistent*` — необязательный WG-only watchdog
+  с автозапуском, без переключения на AWG.
 - `verify-dual-vpn.sh` — итоговая проверка интерфейсов, маршрута и DNS.
 - `enable-vpn-remote-ssh.sh` — отдельное идемпотентное обновление уже настроенного
   роутера: backup, два VPN-маршрута и два ограниченных правила TCP/22.
 
-Подсистема также создаёт ограниченные правила удалённого SSH из `10.8.1.0/24` через
-WG и `10.8.2.0/23` через AWG, а также симметричные маршруты ответа. Общий input из
+Подсистема также создаёт ограниченные правила удалённого SSH из `<WG_ADMIN_CIDR>` через
+WG и `<AWG_ADMIN_CIDR>` через AWG, а также симметричные маршруты ответа. Общий input из
 VPN и вход через LTE/WAN остаются закрыты.
 
 Установщик создаёт симлинки `/usr/sbin/vpn-use-wg`, `/usr/sbin/vpn-use-awg` и команду

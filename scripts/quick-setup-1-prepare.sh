@@ -38,7 +38,7 @@ chmod 755 /etc/hotplug.d/iface/95-vpn-clock /etc/hotplug.d/net/99-wifi-mcs-limit
 
 STAGE2_DIR='/root/cudy-dualvpn-stage2'
 mkdir -p "$STAGE2_DIR"
-for file in quick-setup-2-activate.sh install-dual-vpn-switch.sh enable-vpn-remote-ssh.sh vpn-switch vpn-apply-route vpn-restore-mode vpn-restore-mode.init 96-vpn-route verify-dual-vpn.sh; do
+for file in quick-setup-2-activate.sh install-dual-vpn-switch.sh enable-vpn-remote-ssh.sh enable-persistent-wg.sh vpn-wg-persistent vpn-wg-persistent.init vpn-switch vpn-apply-route vpn-restore-mode vpn-restore-mode.init 96-vpn-route verify-dual-vpn.sh; do
     cp "$SCRIPT_DIR/$file" "$STAGE2_DIR/$file"
     chmod 700 "$STAGE2_DIR/$file"
 done
@@ -51,4 +51,4 @@ chmod 600 "$WG_CONF" "$AWG_CONF"
 sync
 echo 'Stage 1 complete. The configs remain only in /tmp and disappear after reboot.'
 echo 'Reboot now. Then reconnect by Ethernet and run:'
-echo '  /root/cudy-dualvpn-stage2/quick-setup-2-activate.sh wg 1.1.1.1 10.8.1.0/24 10.8.2.0/23'
+echo '  /root/cudy-dualvpn-stage2/quick-setup-2-activate.sh wg <PROBE_IP> <WG_ADMIN_CIDR> <AWG_ADMIN_CIDR>'

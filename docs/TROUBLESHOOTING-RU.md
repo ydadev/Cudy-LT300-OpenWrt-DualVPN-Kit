@@ -137,15 +137,15 @@ nft list ruleset | grep -E '51820|51821|wwan'
 
 ## SSH через WG/AWG не открывается
 
-Подключайтесь к VPN-адресу самого роутера, например `10.8.1.3`, а не к LAN-адресу.
+Подключайтесь к VPN-адресу самого роутера, например `<WG_ROUTER_IP>`, а не к LAN-адресу.
 Проверьте на роутере:
 
 ```sh
 ss -lnt | grep ':22 '
 uci show firewall.vpn_admin_ssh_wg
 uci show firewall.vpn_admin_ssh_awg
-ip -4 route show 10.8.1.0/24
-ip -4 route show 10.8.2.0/23
+ip -4 route show <WG_ADMIN_CIDR>
+ip -4 route show <AWG_ADMIN_CIDR>
 ```
 
 Если Dropbear в `/etc/config/dropbear` принудительно привязан только к `lan`, он не
@@ -170,21 +170,21 @@ ip -4 route get 1.1.1.1
 ```sh
 nft list chain inet fw4 input_vpn
 # имя цепочки зоны может отличаться; при необходимости:
-nft list ruleset | grep -B3 -A3 '10.8.1.0/24'
+nft list ruleset | grep -B3 -A3 '<WG_ADMIN_CIDR>'
 ```
 
 Если счётчик правила WG остаётся `0`, TCP SYN до роутера не дошёл. Не меняйте
 firewall роутера наугад: проверьте маршрут клиента и сервер. Для схемы
-`роутер=10.8.1.3`, `клиент=10.8.1.4` сервер должен назначить этим двум peer
-`AllowedIPs = 10.8.1.3/32` и `AllowedIPs = 10.8.1.4/32`, включить IPv4 forwarding
+`роутер=<WG_ROUTER_IP>`, `клиент=<WG_CLIENT_IP>` сервер должен назначить этим двум peer
+`AllowedIPs = <WG_ROUTER_IP>/32` и `AllowedIPs = <WG_CLIENT_IP>/32`, включить IPv4 forwarding
 и разрешить forwarding `wg0 → wg0`. На клиенте `AllowedIPs` должен включать
-`10.8.1.3` (например, `10.8.1.0/24` или `0.0.0.0/0`).
+`<WG_ROUTER_IP>` (например, `<WG_ADMIN_CIDR>` или `0.0.0.0/0`).
 
 Обратная проверка с роутера:
 
 ```sh
-ip -4 route get 10.8.1.4
-ping -I wg0 -c 4 10.8.1.4
+ip -4 route get <WG_CLIENT_IP>
+ping -I wg0 -c 4 <WG_CLIENT_IP>
 ```
 
 Свежий handshake роутера с сервером не гарантирует связь с другим peer того же

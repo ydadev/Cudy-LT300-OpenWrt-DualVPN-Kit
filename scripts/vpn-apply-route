@@ -5,8 +5,8 @@ mode="${1:-$(uci -q get vpnmode.main.mode || echo awg)}"
 wg_if="$(uci -q get vpnmode.main.wg_if || echo wg0)"
 awg_if="$(uci -q get vpnmode.main.awg_if || echo awg0)"
 wwan_if="$(uci -q get vpnmode.main.wwan_if || echo wwan)"
-wg_admin_net="$(uci -q get vpnmode.main.wg_admin_net || echo 10.8.1.0/24)"
-awg_admin_net="$(uci -q get vpnmode.main.awg_admin_net || echo 10.8.2.0/23)"
+wg_admin_net="$(uci -q get vpnmode.main.wg_admin_net || true)"
+awg_admin_net="$(uci -q get vpnmode.main.awg_admin_net || true)"
 
 case "$mode" in
     wg) iface="$wg_if" ;;
@@ -55,8 +55,8 @@ fi
 
 # Preserve symmetric replies to remote administrators regardless of which VPN
 # currently owns the default route.
-ip link show "$wg_if" >/dev/null 2>&1 && ip -4 route replace "$wg_admin_net" dev "$wg_if" metric 5 || true
-ip link show "$awg_if" >/dev/null 2>&1 && ip -4 route replace "$awg_admin_net" dev "$awg_if" metric 5 || true
+[ -n "$wg_admin_net" ] && ip link show "$wg_if" >/dev/null 2>&1 && ip -4 route replace "$wg_admin_net" dev "$wg_if" metric 5 || true
+[ -n "$awg_admin_net" ] && ip link show "$awg_if" >/dev/null 2>&1 && ip -4 route replace "$awg_admin_net" dev "$awg_if" metric 5 || true
 
 ip -4 route replace default dev "$iface" metric 10
 ip -6 route replace default dev "$iface" metric 10 2>/dev/null || true

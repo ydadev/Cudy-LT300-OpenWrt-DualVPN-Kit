@@ -115,10 +115,10 @@ APN обычно задаётся самому LTE-модему AT-команд�
 На Windows OpenSSH для Dropbear используйте старый SCP-протокол `-O`:
 
 ```powershell
-ssh root@192.168.10.1 "mkdir -p /tmp/Cudy-LT300-OpenWrt-DualVPN-Kit"
-scp -O -r packages drivers scripts checksums root@192.168.10.1:/tmp/Cudy-LT300-OpenWrt-DualVPN-Kit/
-scp -O .\my-wireguard.conf root@192.168.10.1:/tmp/wireguard.conf
-scp -O .\my-amneziawg.conf root@192.168.10.1:/tmp/amneziawg.conf
+ssh root@<ROUTER_LAN_IP> "mkdir -p /tmp/Cudy-LT300-OpenWrt-DualVPN-Kit"
+scp -O -r packages drivers scripts checksums root@<ROUTER_LAN_IP>:/tmp/Cudy-LT300-OpenWrt-DualVPN-Kit/
+scp -O .\my-wireguard.conf root@<ROUTER_LAN_IP>:/tmp/wireguard.conf
+scp -O .\my-amneziawg.conf root@<ROUTER_LAN_IP>:/tmp/amneziawg.conf
 ```
 
 Firmware в `/tmp` для обычной настройки передавать не нужно — это экономит
@@ -168,14 +168,18 @@ Stage 1:
 
 ```sh
 /root/cudy-dualvpn-stage2/quick-setup-2-activate.sh \
-  wg 1.1.1.1 10.8.1.0/24 10.8.2.0/23
+  wg 1.1.1.1 <WG_ADMIN_CIDR> <AWG_ADMIN_CIDR>
 ```
 
 Последние два аргумента — сети, из которых разрешён удалённый SSH через
-соответствующий туннель: `10.8.1.0/24` для WireGuard и `10.8.2.0/23` для
+соответствующий туннель: `<WG_ADMIN_CIDR>` для WireGuard и `<AWG_ADMIN_CIDR>` для
 AmneziaWG. Эти правила не открывают SSH через LTE/WAN.
 
 Нужные stage 2-скрипты были сохранены в `/root` до reboot.
+
+Для фиксированного WG без автоматического выбора AWG после проверки обоих
+туннелей используйте [FIXED-WG-RU.md](FIXED-WG-RU.md). Этот режим необязателен
+и отменяет ручной выбор AWG, пока служба работает.
 
 Если публичный ICMP фильтруется, вместо `1.1.1.1` используйте стабильный
 внутренний IP, доступный через оба туннеля.
@@ -193,14 +197,14 @@ Default route меняется только после успешного тес
 команды: **System → Custom Commands**.
 
 Удалённое управление не зависит от текущего default VPN: отдельные маршруты
-`10.8.1.0/24 dev wg0` и `10.8.2.0/23 dev awg0` возвращают ответ в тот же туннель,
+`<WG_ADMIN_CIDR> dev wg0` и `<AWG_ADMIN_CIDR> dev awg0` возвращают ответ в тот же туннель,
 из которого пришёл SSH. Подключайтесь к адресу самого роутера внутри VPN:
 
 ```sh
-ssh root@10.8.1.3
+ssh root@<WG_ROUTER_IP>
 ```
 
-`10.8.1.3` — пример `Address` интерфейса WG. Для AWG используйте адрес интерфейса
+`<WG_ROUTER_IP>` — пример `Address` интерфейса WG. Для AWG используйте адрес интерфейса
 `awg0` из своего конфига. После проверки положите публичный SSH-ключ в
 `/etc/dropbear/authorized_keys`; пароль отключайте только после проверки резервного
 входа по Ethernet.
@@ -209,7 +213,7 @@ ssh root@10.8.1.3
 
 ```sh
 /tmp/Cudy-LT300-OpenWrt-DualVPN-Kit/scripts/enable-vpn-remote-ssh.sh \
-  10.8.1.0/24 10.8.2.0/23 wg0 awg0
+  <WG_ADMIN_CIDR> <AWG_ADMIN_CIDR> wg0 awg0
 ```
 
 Скрипт сначала создаёт закрытый backup в `/root`, затем меняет только UCI-маршруты

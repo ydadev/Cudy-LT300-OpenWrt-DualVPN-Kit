@@ -63,6 +63,13 @@ uci set "network.$IFACE.nohostroute=1"
 for interface_address in $(printf '%s' "$ADDRESS" | tr ',' ' '); do
     [ -n "$interface_address" ] && uci add_list "network.$IFACE.addresses=$interface_address"
 done
+for dns_entry in $(printf '%s' "$DNS" | tr ',' ' '); do
+    case "$dns_entry" in
+        *:*) uci add_list "network.$IFACE.dns=$dns_entry" ;;
+        *[!0-9.]*) uci add_list "network.$IFACE.dns_search=$dns_entry" ;;
+        *) uci add_list "network.$IFACE.dns=$dns_entry" ;;
+    esac
+done
 
 uci set "network.$PEER=wireguard_$IFACE"
 uci set "network.$PEER.description=imported_wireguard_peer"
@@ -79,19 +86,15 @@ done
 uci -q get network.wwan >/dev/null && uci set network.wwan.metric='100'
 uci -q get network.wwan6 >/dev/null && uci set network.wwan6.metric='100'
 
-if [ -n "$DNS" ]; then
-    uci set dhcp.@dnsmasq[0].noresolv='1'
-    uci -q delete dhcp.@dnsmasq[0].server || true
-    for server in $(printf '%s' "$DNS" | tr ',' ' '); do
-        [ -n "$server" ] && uci add_list "dhcp.@dnsmasq[0].server=$server"
-    done
+uci commit network
+if [ -n "$(uci -q get vpnmode.main.mode || true)" ]; then
+    uci set "vpnmode.main.wg_endpoint=$ENDPOINT_HOST"
+    uci set "vpnmode.main.wg_port=$ENDPOINT_PORT"
+    uci commit vpnmode
 fi
 
-uci commit network
-uci commit dhcp
-
 echo 'WireGuard configuration committed. Secrets are intentionally not printed.'
-echo "Endpoint: $ENDPOINT_HOST:$ENDPOINT_PORT"
+echo 'DNS IPs and search domains were imported into the WG interface; LAN DHCP was not changed.'
 echo 'The peer has route_allowed_ips=0 for safe dual-VPN routing.'
 echo 'Reload netifd once if WireGuard packages were installed in the current boot:'
 echo '  /etc/init.d/network restart'
