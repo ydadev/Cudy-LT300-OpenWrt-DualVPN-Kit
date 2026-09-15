@@ -2,8 +2,9 @@
 
 # Cudy LT300 v3 / MT7628 workaround:
 # Keep 802.11n enabled but restrict AP transmissions to one spatial stream.
-# This reduces load on the MT7603 TX path. On the tested router it is used
-# together with the patched driver and txpower=15; the mask alone was not enough.
+# Optional A/B-test workaround. It was part of the first router's tested profile,
+# but its necessity with the patched driver has not been established. The second
+# LT300 v3 ran without it after a short test; do not enable it by default.
 
 IFACE="phy0-ap0"
 TAG="wifi-mcs-limit"

@@ -27,12 +27,8 @@ echo "Initial backup: $backup"
 cp "$SCRIPT_DIR/awg-sync-modem-time" /usr/sbin/awg-sync-modem-time
 cp "$SCRIPT_DIR/awg-modem-recover" /usr/sbin/awg-modem-recover
 cp "$SCRIPT_DIR/95-vpn-clock" /etc/hotplug.d/iface/95-vpn-clock
-cp "$SCRIPT_DIR/wifi-mcs-limit" /usr/sbin/wifi-mcs-limit
-cp "$SCRIPT_DIR/99-wifi-mcs-limit" /etc/hotplug.d/net/99-wifi-mcs-limit
-cp "$SCRIPT_DIR/wifi-mcs-limit.init" /etc/init.d/wifi-mcs-limit
-chmod 700 /usr/sbin/awg-sync-modem-time /usr/sbin/awg-modem-recover /usr/sbin/wifi-mcs-limit
-chmod 755 /etc/hotplug.d/iface/95-vpn-clock /etc/hotplug.d/net/99-wifi-mcs-limit /etc/init.d/wifi-mcs-limit
-/etc/init.d/wifi-mcs-limit enable
+chmod 700 /usr/sbin/awg-sync-modem-time /usr/sbin/awg-modem-recover
+chmod 755 /etc/hotplug.d/iface/95-vpn-clock
 
 "$SCRIPT_DIR/install-mt7603-patched-driver.sh"
 
@@ -43,7 +39,7 @@ for file in quick-setup-2-activate.sh install-dual-vpn-switch.sh enable-vpn-remo
     chmod 700 "$STAGE2_DIR/$file"
 done
 
-for path in /usr/sbin/awg-sync-modem-time /usr/sbin/awg-modem-recover /usr/sbin/wifi-mcs-limit /etc/hotplug.d/iface/95-vpn-clock /etc/hotplug.d/net/99-wifi-mcs-limit /etc/init.d/wifi-mcs-limit; do
+for path in /usr/sbin/awg-sync-modem-time /usr/sbin/awg-modem-recover /etc/hotplug.d/iface/95-vpn-clock; do
     grep -qxF "$path" /etc/sysupgrade.conf 2>/dev/null || echo "$path" >> /etc/sysupgrade.conf
 done
 

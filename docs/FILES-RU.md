@@ -88,7 +88,8 @@ VPN и вход через LTE/WAN остаются закрыты.
 - `install-mt7603-patched-driver.sh` — exact-проверка, backup и постоянная установка
   `mt76.ko`/`mt7603e.ko`; активация только после reboot.
 - `rollback-mt7603-patched-driver.sh` — восстановление stock-модулей из backup.
-- `wifi-mcs-limit` + init/hotplug — повторное применение TX MCS0–7.
+- `wifi-mcs-limit` + init/hotplug — необязательный сравнительный профиль TX
+  MCS0–7; быстрая установка его не ставит и не включает по умолчанию.
 - `diagnose-multi-client.sh`, `wifi-load-monitor.sh` — нагрузочная диагностика.
 - `cudy-stability-monitor*` — длительный сбор состояния в RAM; включается вручную,
   чтобы не расходовать flash.

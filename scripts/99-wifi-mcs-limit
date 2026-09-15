@@ -1,6 +1,6 @@
 #!/bin/sh
 
-# Reapply the MT7603 one-stream rate mask whenever the AP netdev is created.
+# Optional: reapply the MT7603 one-stream rate mask if explicitly installed.
 [ "$ACTION" = "add" ] || exit 0
 [ "$INTERFACE" = "phy0-ap0" ] || exit 0
 
