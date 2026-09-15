@@ -250,6 +250,63 @@ AmneziaWG. Эти правила не открывают SSH через LTE/WAN.
 Если публичный ICMP фильтруется, вместо `1.1.1.1` используйте стабильный
 внутренний IP, доступный через оба туннеля.
 
+### DNS и DHCP после выбора основного WG
+
+Если у WG и AWG в конфигах **разные DNS IP**, первый этап мог оставить
+`dnsmasq` с сервером из AWG. При основном маршруте WG такой сервер может быть
+недоступен. Проверьте один DNS IP из WG через **оба** туннеля и только если он
+доступен через оба, выдавайте его клиентам. Если общего DNS нет, нужна отдельная
+политика DNS-маршрутов/переключения; не назначайте недоступный адрес.
+
+На чистом LT300 v3 без других DHCP-опций:
+
+```sh
+set -- $(uci -q get network.wg0.dns)
+test "$#" -eq 1
+WG_DNS="$1"
+set -- $(uci -q get network.wg0.dns_search)
+test "$#" -eq 1
+VPN_DOMAIN="$1"
+ping -I wg0 -c 1 -W 3 "$WG_DNS"
+ping -I awg0 -c 1 -W 3 "$WG_DNS"
+cp /etc/config/dhcp /root/dhcp.before-vpn-dns.conf
+chmod 600 /root/dhcp.before-vpn-dns.conf
+uci set dhcp.@dnsmasq[0].noresolv='1'
+uci -q delete dhcp.@dnsmasq[0].server
+uci add_list "dhcp.@dnsmasq[0].server=$WG_DNS"
+uci -q delete dhcp.lan.dhcp_option
+uci add_list "dhcp.lan.dhcp_option=6,$WG_DNS"
+uci add_list "dhcp.lan.dhcp_option=15,$VPN_DOMAIN"
+uci add_list "dhcp.lan.dhcp_option=119,$VPN_DOMAIN"
+uci commit dhcp
+/etc/init.d/dnsmasq restart
+nslookup -type=A openwrt.org 127.0.0.1
+```
+
+Опции DHCP 6, 15 и 119 соответственно выдают DNS, доменное имя и поисковый
+суффикс ([примеры OpenWrt](https://openwrt.org/docs/guide-user/base-system/dhcp_configuration),
+[RFC 2132](https://www.rfc-editor.org/info/rfc2132/),
+[RFC 3397](https://www.rfc-editor.org/info/rfc3397/)). Если в
+`dhcp.lan.dhcp_option` уже есть другие опции, **не удаляйте
+весь список** как в примере: сохраните их и замените лишь 6/15/119. После
+изменения переподключите клиентов, чтобы они получили новую DHCP-аренду.
+Отсутствующий в WG `dns_search` замените своим поисковым доменом либо не
+выдавайте опции 15/119.
+
+Если оба ваших профиля имеют только IPv4 `Address`, а VPN-сервер не даёт IPv6,
+отключите объявления IPv6 в LAN: иначе клиентам будет выдан префикс без
+рабочего выхода. IPv4 DHCP при этом остаётся включённым. Не делайте этого при
+действительно рабочем IPv6 через туннель.
+
+```sh
+uci set network.lan.ip6assign='0'
+uci set dhcp.lan.ra='disabled'
+uci set dhcp.lan.dhcpv6='disabled'
+uci commit network
+uci commit dhcp
+/etc/init.d/odhcpd restart
+```
+
 ## 10. Ручное переключение
 
 ```sh
@@ -334,3 +391,7 @@ sha256sum /tmp/cudy-dualvpn-working.tar.gz
 
 Скопируйте файл с роутера и не публикуйте. Затем выполните один контролируемый
 cold boot: выключить питание на 10 секунд, включить и повторить проверки.
+Backup `sysupgrade -b` сохраняет настройки, но **не заменяет** firmware,
+совместимые APK и патченные `.ko` из комплекта. Храните их отдельно; после
+чистой прошивки пакеты и драйвер нужно устанавливать заново для её точной
+версии ядра.
